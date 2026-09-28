@@ -73,16 +73,3 @@ checkov -d terraform/ --compact
 # Secrets scanning
 gitleaks detect --source . --verbose
 ```
-
-## Guion corto para mostrarlo en la entrevista
-
-1. "Armé un mini-repo con fallas intencionales para probar el pipeline
-   completo, no solo describirlo."
-2. Muestra `security-pipeline.yml` y recorre el orden: secrets → SAST/SCA →
-   IaC → build+container scan → SBOM → DAST, explicando el porqué del orden
-   (shift-left, costo de corrección).
-3. Muestra `evidence/checkov-output.txt` o `npm-audit-output.txt` como
-   prueba de que no es teoría — son hallazgos reales sobre código real.
-4. Cierra con el caso del secreto: la clave de AWS no detectada por
-   allowlist vs. la clave sintética sí detectada — demuestra que entiendes
-   los matices de estas herramientas, no solo cómo instalarlas.
