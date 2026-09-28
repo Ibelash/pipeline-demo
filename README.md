@@ -1,7 +1,6 @@
-# Pipeline de práctica — Application Security Specialist (Bold)
+# Pipeline de práctica — Application Security Specialist
 
-Mini-repo para mostrar en la entrevista, con hallazgos **reales** (no inventados)
-generados corriendo las herramientas contra el código de este mismo repo.
+Mini-repo para mostrar hallazgos **reales**
 
 ## Qué hay aquí
 
@@ -19,18 +18,6 @@ evidence/                     → salidas REALES de correr las herramientas cont
   gitleaks-report.json        → 1 secreto sintético detectado (stripe-access-token)
   gitleaks-console.txt        → salida de consola de gitleaks
 ```
-
-## Cómo se conecta con la guía de estudio
-
-| Sección de la guía | Dónde está aquí |
-|---|---|
-| Controles por etapa del pipeline | Cada job del YAML, comentado con qué gate aplica y por qué |
-| Gates según riesgo | Comentarios `# Gate:` en cada job — qué bloquea vs. qué solo reporta |
-| IaC scanning | Job `iac-scan` + hallazgos reales en `evidence/checkov-output.txt` |
-| Container scanning | Job `build-and-container-scan` (Trivy sobre la imagen) |
-| SBOM | Job `sbom` — CycloneDX, mencionado en la guía como formato de referencia |
-| CICD-SEC (seguridad del pipeline en sí) | Comentarios que citan CICD-SEC-2, CICD-SEC-5, CICD-SEC-9 directamente |
-| Secrets scanning | Job `secrets-scan` + el hallazgo real y el **falso negativo real** abajo |
 
 ## Los 3 hallazgos reales, explicados
 
