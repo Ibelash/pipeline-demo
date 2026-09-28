@@ -1,0 +1,22 @@
+[
+ {
+  "Description": "Found a Stripe Access Token, posing a risk to payment processing services and sensitive financial data.",
+  "StartLine": 18,
+  "EndLine": 18,
+  "StartColumn": 35,
+  "EndColumn": 76,
+  "Match": "sk_live_51N7qK2mR9tXvB4pL8wY3cJ6fH0dQaZeT\"",
+  "Secret": "sk_live_51N7qK2mR9tXvB4pL8wY3cJ6fH0dQaZeT",
+  "File": "app/index.js",
+  "SymlinkFile": "",
+  "Commit": "8e9ebce7b58c3395fbaaab6e927d1703a0cbe6ea",
+  "Entropy": 5.2112107,
+  "Author": "demo",
+  "Email": "demo@demo.com",
+  "Date": "2026-09-21T14:00:44Z",
+  "Message": "add synthetic non-allowlisted secret for demo",
+  "Tags": [],
+  "RuleID": "stripe-access-token",
+  "Fingerprint": "8e9ebce7b58c3395fbaaab6e927d1703a0cbe6ea:app/index.js:stripe-access-token:18"
+ }
+]

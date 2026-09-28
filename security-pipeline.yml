@@ -1,0 +1,200 @@
+name: Security Pipeline
+
+# Se activa en cada PR contra main (feedback temprano) y en push a main.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Principio de mínimo privilegio a nivel de workflow (mitiga CICD-SEC-2 / CICD-SEC-5):
+# el token del GITHUB_TOKEN empieza en solo-lectura; cada job sube el permiso
+# puntual que necesita (p.ej. security-events: write para subir SARIF).
+permissions:
+  contents: read
+
+jobs:
+
+  # ──────────────────────────────────────────────────────────────────
+  # 1) SECRETS SCANNING — la primera puerta, porque un secreto expuesto
+  #    es crítico por definición y no requiere más contexto para bloquear.
+  # ──────────────────────────────────────────────────────────────────
+  secrets-scan:
+    name: "🔑 Secrets scanning (gitleaks)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # necesario para que gitleaks revise todo el historial, no solo el HEAD
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Gate: gitleaks-action retorna exit code != 0 si encuentra algo -> el job falla
+        # y bloquea el merge. No hay "severidad media" en secretos: todo hallazgo bloquea.
+
+  # ──────────────────────────────────────────────────────────────────
+  # 2) SAST — análisis estático del código fuente
+  # ──────────────────────────────────────────────────────────────────
+  sast:
+    name: "🔍 SAST (Semgrep)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # requerido para subir SARIF a la pestaña Security
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar y correr Semgrep
+        run: |
+          pip install semgrep
+          # p/ci: ruleset curado por Semgrep pensado para bloquear en pipelines (bajo ruido).
+          # p/owasp-top-ten: cobertura específica de OWASP Top 10.
+          semgrep ci --config p/ci --config p/owasp-top-ten \
+            --sarif --output semgrep.sarif
+        # Gate: "semgrep ci" retorna exit code 1 si hay findings de severidad ERROR
+        # (equivalente a alto/crítico) -> bloquea el merge. Los findings de nivel
+        # WARNING quedan registrados pero no rompen el build (gate según riesgo).
+      - name: Subir resultados a GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+
+  # ──────────────────────────────────────────────────────────────────
+  # 3) SCA — dependencias de terceros
+  # ──────────────────────────────────────────────────────────────────
+  sca:
+    name: "📦 SCA (dependencias)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Instalar dependencias
+        working-directory: app
+        run: npm ci || npm install
+      - name: Audit de dependencias — gate crítico/alto
+        working-directory: app
+        run: npm audit --audit-level=high
+        # Gate: npm audit retorna exit code != 0 si hay vulnerabilidades >= "high"
+        # -> bloquea el merge. Lo medio/bajo queda visible en el reporte, sin bloquear.
+      - name: Escaneo adicional con Trivy (filesystem + SBOM)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: app/
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-fs.sarif
+      - name: Subir resultados a GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+
+  # ──────────────────────────────────────────────────────────────────
+  # 4) IaC SCANNING — el plano de infraestructura, antes de aplicarlo
+  # ──────────────────────────────────────────────────────────────────
+  iac-scan:
+    name: "🏗️ IaC scanning (Checkov)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar y correr Checkov
+        run: |
+          pip install checkov
+          checkov -d terraform/ --compact --output sarif --output-file-path checkov.sarif
+        # Gate: por defecto Checkov retorna exit code 1 si hay checks fallidos.
+        # En un caso real, se filtrarían por severidad con --check/--skip-check
+        # o un baseline (.checkov.baseline) para no bloquear por hallazgos ya
+        # aceptados/en excepción documentada.
+      - name: Subir resultados a GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+
+  # ──────────────────────────────────────────────────────────────────
+  # 5) BUILD + CONTAINER SCANNING — solo si todo lo anterior pasó
+  #    (needs: shift-left real — no construimos ni publicamos una imagen
+  #    si el código, las dependencias o la infra ya fallaron controles)
+  # ──────────────────────────────────────────────────────────────────
+  build-and-container-scan:
+    name: "🐳 Build + Container scanning (Trivy)"
+    runs-on: ubuntu-latest
+    needs: [secrets-scan, sast, sca, iac-scan]
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build de la imagen
+        run: docker build -t demo-app:${{ github.sha }} .
+      - name: Escanear la imagen con Trivy
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: demo-app:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          exit-code: "1" # gate: bloquea el push al registry si hay crítico/alto
+          ignore-unfixed: true # evita ruido de CVEs que todavía no tienen parche
+
+  # ──────────────────────────────────────────────────────────────────
+  # 6) SBOM — inventario del artefacto que sí va a producción
+  # ──────────────────────────────────────────────────────────────────
+  sbom:
+    name: "📋 SBOM (CycloneDX)"
+    runs-on: ubuntu-latest
+    needs: [build-and-container-scan]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generar SBOM de la imagen
+        uses: anchore/sbom-action@v0
+        with:
+          image: demo-app:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+      - name: Publicar SBOM como artefacto del workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.cdx.json
+      # En un pipeline real de producción, el siguiente paso sería firmar la
+      # imagen con cosign (Sigstore) antes de publicarla al registry, para
+      # que el deploy solo acepte artefactos firmados y verificados
+      # (mitiga CICD-SEC-9 — Improper Artifact Integrity Validation).
+
+  # ──────────────────────────────────────────────────────────────────
+  # 7) DAST — solo contra un entorno vivo, por eso va al final y solo en main
+  # ──────────────────────────────────────────────────────────────────
+  dast:
+    name: "🎯 DAST (OWASP ZAP baseline)"
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [build-and-container-scan]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Levantar la app en modo efímero
+        run: |
+          docker build -t demo-app:${{ github.sha }} .
+          docker run -d -p 3000:3000 --name demo-app demo-app:${{ github.sha }}
+          sleep 3
+      - name: Escaneo baseline con ZAP
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "http://localhost:3000"
+        # Gate más laxo a propósito: DAST corre sobre la app completa, con más
+        # falsos positivos que SAST. Por default action-baseline NO rompe el
+        # build en hallazgos de riesgo medio/bajo — abre un issue. Solo un
+        # hallazgo crítico (ej. auth bypass) justificaría bloquear el deploy.

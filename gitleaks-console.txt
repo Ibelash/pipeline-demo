@@ -1,0 +1,22 @@
+
+    ○
+    │╲
+    │ ○
+    ○ ░
+    ░    gitleaks
+
+Finding:     ..._GATEWAY_API_KEY = "[1;3;msk_live_51N7qK2mR9tXvB4pL8wY3cJ6fH0dQaZeT[0m"
+Secret:      [1;3;msk_live_51N7qK2mR9tXvB4pL8wY3cJ6fH0dQaZeT[0m
+RuleID:      stripe-access-token
+Entropy:     5.211211
+File:        app/index.js
+Line:        18
+Commit:      8e9ebce7b58c3395fbaaab6e927d1703a0cbe6ea
+Author:      demo
+Email:       demo@demo.com
+Date:        2026-09-21T14:00:44Z
+Fingerprint: 8e9ebce7b58c3395fbaaab6e927d1703a0cbe6ea:app/index.js:stripe-access-token:18
+
+[90m2:00PM[0m [32mINF[0m 2 commits scanned.
+[90m2:00PM[0m [32mINF[0m scan completed in 13.7ms
+[90m2:00PM[0m [31mWRN[0m leaks found: 1
