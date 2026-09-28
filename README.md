@@ -1,4 +1,4 @@
-# Pipeline de práctica — Application Security Specialist
+# Pipeline de práctica - Application Security Specialist
 
 Mini-repo para mostrar hallazgos **reales**
 
