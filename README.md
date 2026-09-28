@@ -1,0 +1,101 @@
+# Pipeline de práctica — Application Security Specialist (Bold)
+
+Mini-repo para mostrar en la entrevista, con hallazgos **reales** (no inventados)
+generados corriendo las herramientas contra el código de este mismo repo.
+
+## Qué hay aquí
+
+```
+app/                          → app Express con una dependencia vulnerable a propósito (lodash 4.17.4)
+                                 y dos "secretos" de ejemplo en index.js
+terraform/main.tf             → infraestructura con fallas de config a propósito
+Dockerfile                    → imagen que corre como root a propósito
+.github/workflows/
+  security-pipeline.yml       → el pipeline completo: secrets → SAST → SCA →
+                                 IaC → build+container scan → SBOM → DAST
+evidence/                     → salidas REALES de correr las herramientas contra este repo
+  npm-audit-output.txt        → 8 vulnerabilidades reales (1 crítica, 4 altas)
+  checkov-output.txt          → 21 checks fallidos reales sobre terraform/main.tf
+  gitleaks-report.json        → 1 secreto sintético detectado (stripe-access-token)
+  gitleaks-console.txt        → salida de consola de gitleaks
+```
+
+## Cómo se conecta con la guía de estudio
+
+| Sección de la guía | Dónde está aquí |
+|---|---|
+| Controles por etapa del pipeline | Cada job del YAML, comentado con qué gate aplica y por qué |
+| Gates según riesgo | Comentarios `# Gate:` en cada job — qué bloquea vs. qué solo reporta |
+| IaC scanning | Job `iac-scan` + hallazgos reales en `evidence/checkov-output.txt` |
+| Container scanning | Job `build-and-container-scan` (Trivy sobre la imagen) |
+| SBOM | Job `sbom` — CycloneDX, mencionado en la guía como formato de referencia |
+| CICD-SEC (seguridad del pipeline en sí) | Comentarios que citan CICD-SEC-2, CICD-SEC-5, CICD-SEC-9 directamente |
+| Secrets scanning | Job `secrets-scan` + el hallazgo real y el **falso negativo real** abajo |
+
+## Los 3 hallazgos reales, explicados
+
+### 1. SCA — `npm audit` (evidence/npm-audit-output.txt)
+`lodash@4.17.4` trae **1 vulnerabilidad crítica** (prototype pollution,
+GHSA-fvqr-27wr-82fm) y varias altas en `express`/`body-parser`/`qs` por
+dependencias transitivas desactualizadas. 8 vulnerabilidades en total con
+CVEs/advisories reales de GitHub.
+
+**Para la entrevista:** esto es exactamente el caso de "SAST/SCA con 200
+findings" — aquí no son 200, pero la lógica es la misma: la vulnerabilidad
+crítica de lodash bloquearía el merge (`npm audit --audit-level=high` sale
+con exit code ≠ 0), las de severidad media/baja quedarían visibles sin
+bloquear.
+
+### 2. IaC scanning — Checkov (evidence/checkov-output.txt)
+**21 checks fallidos** sobre 3 recursos de Terraform: bucket S3 público y
+sin encriptar, security group con SSH abierto a `0.0.0.0/0`, y una policy
+IAM con `Action: "*"` / `Resource: "*"`.
+
+**Para la entrevista:** la política IAM con `*:*` es el ejemplo perfecto de
+"por qué el orden importa" — Checkov lo marca en el build, antes de que
+`terraform apply` cree ese rol en una cuenta real.
+
+### 3. Secrets scanning — gitleaks (evidence/gitleaks-report.json)
+Aquí pasó algo genuinamente interesante y vale la pena contarlo en la
+entrevista tal como ocurrió:
+
+- La primera clave de ejemplo que puse (`AKIAIOSFODNN7EXAMPLE`, la que AWS
+  usa en su propia documentación pública) **no fue detectada**. gitleaks la
+  trae en su allowlist por defecto, precisamente porque es tan conocida que
+  generaría ruido constante en miles de repos que la citan como ejemplo.
+- Agregué una segunda clave sintética (formato `sk_live_...`, sin significado
+  real) y esa **sí fue detectada** — regla `stripe-access-token`, con el
+  commit, archivo y línea exactos.
+
+**Para la entrevista:** esto es una demostración real de "cómo manejo falsos
+positivos/negativos sin perder cobertura" — un allowlist mal pensado puede
+ocultar hallazgos reales si alguien reutiliza un patrón "de ejemplo" con
+datos reales. Es un buen contraejemplo para hablar de por qué las
+supresiones necesitan revisión periódica.
+
+## Cómo reproducirlo
+
+```bash
+# SCA
+cd app && npm install --package-lock-only && npm audit
+
+# IaC scanning
+pip install checkov
+checkov -d terraform/ --compact
+
+# Secrets scanning
+gitleaks detect --source . --verbose
+```
+
+## Guion corto para mostrarlo en la entrevista
+
+1. "Armé un mini-repo con fallas intencionales para probar el pipeline
+   completo, no solo describirlo."
+2. Muestra `security-pipeline.yml` y recorre el orden: secrets → SAST/SCA →
+   IaC → build+container scan → SBOM → DAST, explicando el porqué del orden
+   (shift-left, costo de corrección).
+3. Muestra `evidence/checkov-output.txt` o `npm-audit-output.txt` como
+   prueba de que no es teoría — son hallazgos reales sobre código real.
+4. Cierra con el caso del secreto: la clave de AWS no detectada por
+   allowlist vs. la clave sintética sí detectada — demuestra que entiendes
+   los matices de estas herramientas, no solo cómo instalarlas.
